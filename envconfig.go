@@ -65,7 +65,6 @@ type reflectedSetter struct {
 }
 
 func (s *reflectedSetter) Set(value string) error {
-	fmt.Println(s.field.Type())
 	retval := s.method.Call([]reflect.Value{s.field.Addr(), reflect.ValueOf(value)})[0]
 	if retval.IsNil() {
 		return nil
@@ -74,14 +73,24 @@ func (s *reflectedSetter) Set(value string) error {
 	}
 }
 
-func lookupSetter(s, field reflect.Value, name string) Setter {
-	m := s.MethodByName(name)
-	if !m.IsValid() {
-		if !s.CanAddr() {
-			return nil
-		}
-		s = s.Addr()
+func lookupSetter(chain []reflect.Value, field reflect.Value, name string) Setter {
+	var m reflect.Value
+	i := len(chain)
+	for i > 0 {
+		i--
+		s := chain[i]
 		m = s.MethodByName(name)
+		if !m.IsValid() {
+			if !s.CanAddr() {
+				continue
+			}
+			s = s.Addr()
+			m = s.MethodByName(name)
+			if !m.IsValid() {
+				continue
+			}
+		}
+		break
 	}
 	if !m.IsValid() {
 		return nil
@@ -103,9 +112,10 @@ func lookupSetter(s, field reflect.Value, name string) Setter {
 	return &reflectedSetter{field, m}
 }
 
-// GatherInfo gathers information about the specified struct
-func gatherInfo(prefixes []string, spec interface{}, delim string) ([]*varInfo, error) {
+// gatherInfo (gatherInfoInner) gathers information about the specified struct
+func gatherInfoInner(chain []reflect.Value, prefixes []string, spec interface{}, delim string) ([]*varInfo, error) {
 	s := reflect.ValueOf(spec)
+	chain = append(chain, s)
 
 	if s.Kind() != reflect.Ptr {
 		return nil, ErrInvalidSpecification
@@ -140,21 +150,21 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]*varInfo, 
 		var setter, keySetter, elemSetter Setter
 
 		if setterName, ok := ftype.Tag.Lookup("envconfig_setter"); ok {
-			setter = lookupSetter(s, f, setterName)
+			setter = lookupSetter(chain, f, setterName)
 			if setter == nil {
 				return nil, fmt.Errorf(`no such setter "%s" found`, setterName)
 			}
 		}
 
 		if setterName, ok := ftype.Tag.Lookup("envconfig_key_setter"); ok {
-			keySetter = lookupSetter(s, f, setterName)
+			keySetter = lookupSetter(chain, f, setterName)
 			if keySetter == nil {
 				return nil, fmt.Errorf(`no such setter "%s" found`, setterName)
 			}
 		}
 
 		if setterName, ok := ftype.Tag.Lookup("envconfig_elem_setter"); ok {
-			elemSetter = lookupSetter(s, f, setterName)
+			elemSetter = lookupSetter(chain, f, setterName)
 			if elemSetter == nil {
 				return nil, fmt.Errorf(`no such setter "%s" found`, setterName)
 			}
@@ -223,7 +233,7 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]*varInfo, 
 			}
 
 			embeddedPtr := f.Addr().Interface()
-			embeddedInfos, err := gatherInfo(innerPrefixes, embeddedPtr, delim)
+			embeddedInfos, err := gatherInfoInner(chain, innerPrefixes, embeddedPtr, delim)
 			if err != nil {
 				return nil, err
 			}
@@ -233,6 +243,10 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]*varInfo, 
 		}
 	}
 	return infos, nil
+}
+
+func gatherInfo(prefixes []string, spec interface{}, delim string) ([]*varInfo, error) {
+	return gatherInfoInner([]reflect.Value{}, prefixes, spec, delim)
 }
 
 // composePrefix gets prefix and delim concatenated and returns the result
