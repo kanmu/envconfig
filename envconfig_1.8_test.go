@@ -3,15 +3,15 @@
 package envconfig
 
 import (
-	"os"
-	"net/url"
-	"testing"
 	"errors"
+	"net/url"
+	"os"
+	"testing"
 )
 
 type SpecWithURL struct {
-	UrlValue     url.URL
-	UrlPointer   *url.URL
+	UrlValue   url.URL
+	UrlPointer *url.URL
 }
 
 func TestParseURL(t *testing.T) {
@@ -21,7 +21,7 @@ func TestParseURL(t *testing.T) {
 	os.Setenv("ENV_CONFIG_URLVALUE", "https://github.com/kelseyhightower/envconfig")
 	os.Setenv("ENV_CONFIG_URLPOINTER", "https://github.com/kelseyhightower/envconfig")
 
-	err := Process("env_config", &s)
+	err := Process([]string{"env_config_"}, &s, "_")
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
@@ -46,7 +46,7 @@ func TestParseURLError(t *testing.T) {
 	os.Clearenv()
 	os.Setenv("ENV_CONFIG_URLPOINTER", "http_://foo")
 
-	err := Process("env_config", &s)
+	err := Process([]string{"env_config_"}, &s, "_")
 
 	v, ok := err.(*ParseError)
 	if !ok {

@@ -37,9 +37,9 @@ KEY	TYPE	DEFAULT	REQUIRED	DESCRIPTION
 )
 
 var (
-	decoderType         = reflect.TypeOf((*Decoder)(nil)).Elem()
-	setterType          = reflect.TypeOf((*Setter)(nil)).Elem()
-	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+	decoderType           = reflect.TypeOf((*Decoder)(nil)).Elem()
+	setterType            = reflect.TypeOf((*Setter)(nil)).Elem()
+	textUnmarshalerType   = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 	binaryUnmarshalerType = reflect.TypeOf((*encoding.BinaryUnmarshaler)(nil)).Elem()
 )
 
@@ -107,27 +107,28 @@ func toTypeDescription(t reflect.Type) string {
 }
 
 // Usage writes usage information to stderr using the default header and table format
-func Usage(prefix string, spec interface{}) error {
+func Usage(prefixes []string, spec interface{}, delim string) error {
 	// The default is to output the usage information as a table
 	// Create tabwriter instance to support table output
 	tabs := tabwriter.NewWriter(os.Stdout, 1, 0, 4, ' ', 0)
 
-	err := Usagef(prefix, spec, tabs, DefaultTableFormat)
+	err := Usagef(prefixes, spec, tabs, DefaultTableFormat, delim)
 	tabs.Flush()
 	return err
 }
 
 // Usagef writes usage information to the specified io.Writer using the specifed template specification
-func Usagef(prefix string, spec interface{}, out io.Writer, format string) error {
+func Usagef(prefixes []string, spec interface{}, out io.Writer, format string, delim string) error {
 
 	// Specify the default usage template functions
 	functions := template.FuncMap{
-		"usage_key":         func(v varInfo) string { return v.Key },
-		"usage_description": func(v varInfo) string { return v.Tags.Get("desc") },
+		"usage_key":         func(v varInfo) string { return stringizeKeys(v.Keys) },
+		"usage_key_first":   func(v varInfo) string { return v.Keys[0] },
+		"usage_description": func(v varInfo) string { return v.Tags.Get("envconfig_desc") },
 		"usage_type":        func(v varInfo) string { return toTypeDescription(v.Field.Type()) },
-		"usage_default":     func(v varInfo) string { return v.Tags.Get("default") },
+		"usage_default":     func(v varInfo) string { return v.Tags.Get("envconfig_default") },
 		"usage_required": func(v varInfo) (string, error) {
-			req := v.Tags.Get("required")
+			req := v.Tags.Get("envconfig_required")
 			if req != "" {
 				reqB, err := strconv.ParseBool(req)
 				if err != nil {
@@ -146,13 +147,13 @@ func Usagef(prefix string, spec interface{}, out io.Writer, format string) error
 		return err
 	}
 
-	return Usaget(prefix, spec, out, tmpl)
+	return Usaget(prefixes, spec, out, tmpl, delim)
 }
 
 // Usaget writes usage information to the specified io.Writer using the specified template
-func Usaget(prefix string, spec interface{}, out io.Writer, tmpl *template.Template) error {
+func Usaget(prefixes []string, spec interface{}, out io.Writer, tmpl *template.Template, delim string) error {
 	// gather first
-	infos, err := gatherInfo(prefix, spec)
+	infos, err := gatherInfo(prefixes, spec, delim)
 	if err != nil {
 		return err
 	}
