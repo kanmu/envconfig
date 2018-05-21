@@ -75,7 +75,7 @@ func TestUsageDefault(t *testing.T) {
 	save := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	err := Usage("env_config", &s)
+	err := Usage([]string{"env_config_"}, &s, "_")
 	outC := make(chan string)
 	// copy the output in a separate goroutine so printing can't block indefinitely
 	go func() {
@@ -98,7 +98,7 @@ func TestUsageTable(t *testing.T) {
 	os.Clearenv()
 	buf := new(bytes.Buffer)
 	tabs := tabwriter.NewWriter(buf, 1, 0, 4, ' ', 0)
-	err := Usagef("env_config", &s, tabs, DefaultTableFormat)
+	err := Usagef([]string{"env_config_"}, &s, tabs, DefaultTableFormat, "_")
 	tabs.Flush()
 	if err != nil {
 		t.Error(err.Error())
@@ -110,7 +110,7 @@ func TestUsageList(t *testing.T) {
 	var s Specification
 	os.Clearenv()
 	buf := new(bytes.Buffer)
-	err := Usagef("env_config", &s, buf, DefaultListFormat)
+	err := Usagef([]string{"env_config_"}, &s, buf, DefaultListFormat, "_")
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -121,7 +121,7 @@ func TestUsageCustomFormat(t *testing.T) {
 	var s Specification
 	os.Clearenv()
 	buf := new(bytes.Buffer)
-	err := Usagef("env_config", &s, buf, "{{range .}}{{usage_key .}}={{usage_description .}}\n{{end}}")
+	err := Usagef([]string{"env_config_"}, &s, buf, "{{range .}}{{usage_key_first .}}={{usage_description .}}\n{{end}}", "_")
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -133,7 +133,7 @@ func TestUsageUnknownKeyFormat(t *testing.T) {
 	unknownError := "template: envconfig:1:2: executing \"envconfig\" at <.UnknownKey>"
 	os.Clearenv()
 	buf := new(bytes.Buffer)
-	err := Usagef("env_config", &s, buf, "{{.UnknownKey}}")
+	err := Usagef([]string{"env_config_"}, &s, buf, "{{.UnknownKey}}", "_")
 	if err == nil {
 		t.Errorf("expected 'unknown key' error, but got no error")
 	}
@@ -147,7 +147,7 @@ func TestUsageBadFormat(t *testing.T) {
 	os.Clearenv()
 	// If you don't use two {{}} then you get a lieteral
 	buf := new(bytes.Buffer)
-	err := Usagef("env_config", &s, buf, "{{range .}}{.Key}\n{{end}}")
+	err := Usagef([]string{"env_config_"}, &s, buf, "{{range .}}{.Key}\n{{end}}", "_")
 	if err != nil {
 		t.Error(err.Error())
 	}

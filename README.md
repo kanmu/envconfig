@@ -1,14 +1,17 @@
 # envconfig
 
-[![Build Status](https://travis-ci.org/kelseyhightower/envconfig.svg)](https://travis-ci.org/kelseyhightower/envconfig)
+This is a fork of https://github.com/kelseyhightower/envconfig.  Kudos to the original authors for saving me a lot of time!"
+
+
+[![Build Status](https://travis-ci.org/moriyoshi/envconfig.svg)](https://travis-ci.org/moriyoshi/envconfig)
 
 ```Go
-import "github.com/kelseyhightower/envconfig"
+import "github.com/moriyoshi/envconfig"
 ```
 
 ## Documentation
 
-See [godoc](http://godoc.org/github.com/kelseyhightower/envconfig)
+See [godoc](http://godoc.org/github.com/moriyoshi/envconfig)
 
 ## Usage
 
@@ -99,15 +102,15 @@ For example, consider the following struct:
 ```Go
 type Specification struct {
     ManualOverride1 string `envconfig:"manual_override_1"`
-    DefaultVar      string `default:"foobar"`
-    RequiredVar     string `required:"true"`
-    IgnoredVar      string `ignored:"true"`
-    AutoSplitVar    string `split_words:"true"`
+    DefaultVar      string `envconfig_default:"foobar"`
+    RequiredVar     string `envconfig_required:"true"`
+    IgnoredVar      string `envconfig_ignored:"true"`
+    AutoSplitVar    string `envconfig_snake:"true"`
 }
 ```
 
 Envconfig has automatic support for CamelCased struct elements when the
-`split_words:"true"` tag is supplied. Without this tag, `AutoSplitVar` above
+`envconfig_snake:"true"` tag is supplied. Without this tag, `AutoSplitVar` above
 would look for an environment variable called `MYAPP_AUTOSPLITVAR`. With the
 setting applied it will look for `MYAPP_AUTO_SPLIT_VAR`. Note that numbers
 will get globbed into the previous word. If the setting does not do the
@@ -115,7 +118,7 @@ right thing, you may use a manual override.
 
 Envconfig will process value for `ManualOverride1` by populating it with the
 value for `MYAPP_MANUAL_OVERRIDE_1`. Without this struct tag, it would have
-instead looked up `MYAPP_MANUALOVERRIDE1`. With the `split_words:"true"` tag
+instead looked up `MYAPP_MANUALOVERRIDE1`. With the `envconfig_snake:"true"` tag
 it would have looked up `MYAPP_MANUAL_OVERRIDE1`.
 
 ```Bash
@@ -132,7 +135,8 @@ it will return an error when asked to process the struct.
 
 If envconfig can't find an environment variable in the form `PREFIX_MYVAR`, and there
 is a struct tag defined, it will try to populate your variable with an environment
-variable that directly matches the envconfig tag in your struct definition:
+variable that directly matches the envconfig tag in your struct definition unless
+`envconfig_alt_prefixed:"false"` is specified:
 
 ```shell
 export SERVICE_HOST=127.0.0.1
@@ -145,7 +149,26 @@ type Specification struct {
 }
 ```
 
-Envconfig won't process a field with the "ignored" tag set to "true", even if a corresponding
+Otherwise, the environment variable that exactly matches the value of `envconfig`
+tag will be looked up:
+
+```Go
+type Specification struct {
+    ServiceHost string `envconfig:"SERVICE_HOST" envconfig_alt_prefixed:"false"`
+    Debug       bool
+}
+```
+
+You can specify multiple aliases to `envconfig` tag by delimiting each name by equal sign (`=`).
+
+```Go
+type Specification struct {
+    ServiceHost string `envconfig:"SERVICE_HOST=SERVICEHOST"`
+    Debug       bool
+}
+```
+
+Envconfig won't process a field with the `envconfig_ignored` tag set to `true`, even if a corresponding
 environment variable is set.
 
 ## Supported Struct Field Types
