@@ -188,6 +188,8 @@ Embedded structs using these fields are also supported.
 
 ## Custom Decoders
 
+### envconfig.Decoder
+
 Any field whose type (or pointer-to-type) implements `envconfig.Decoder` can
 control its own deserialization:
 
@@ -210,3 +212,19 @@ type DNSConfig struct {
 
 Also, envconfig will use a `Set(string) error` method like from the
 [flag.Value](https://godoc.org/flag#Value) interface if implemented.
+
+### envconfig_setter tag
+
+Or you can apply custom decoder to a field by supplying `envconfig_setter` tag.
+
+```Go
+type Specification struct {
+    Foo string `envconfig_setter:"DecodeFoo"`
+}
+
+func (*Specification) DecodeFoo(s *string, value string) error {
+    s = value + "!"
+    return nil
+}
+
+```

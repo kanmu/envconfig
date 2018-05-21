@@ -48,14 +48,63 @@ func (e *ParseError) Error() string {
 
 // varInfo maintains information about the configuration variable
 type varInfo struct {
-	Name  string
-	Keys  []string
-	Field reflect.Value
-	Tags  reflect.StructTag
+	Name       string
+	Keys       []string
+	Field      reflect.Value
+	Tags       reflect.StructTag
+	Default    string
+	Required   bool
+	Setter     Setter
+	KeySetter  Setter
+	ElemSetter Setter
+}
+
+type reflectedSetter struct {
+	field  reflect.Value
+	method reflect.Value
+}
+
+func (s *reflectedSetter) Set(value string) error {
+	fmt.Println(s.field.Type())
+	retval := s.method.Call([]reflect.Value{s.field.Addr(), reflect.ValueOf(value)})[0]
+	if retval.IsNil() {
+		return nil
+	} else {
+		return retval.Interface().(error)
+	}
+}
+
+func lookupSetter(s, field reflect.Value, name string) Setter {
+	m := s.MethodByName(name)
+	if !m.IsValid() {
+		if !s.CanAddr() {
+			return nil
+		}
+		s = s.Addr()
+		m = s.MethodByName(name)
+	}
+	if !m.IsValid() {
+		return nil
+	}
+	mTyp := m.Type()
+	if mTyp.NumIn() != 2 {
+		return nil
+	}
+	if mTyp.NumOut() != 1 {
+		return nil
+	}
+	if mTyp.In(0) != reflect.PtrTo(field.Type()) {
+		return nil
+	}
+	if mTyp.In(1).Kind() != reflect.String {
+		return nil
+	}
+
+	return &reflectedSetter{field, m}
 }
 
 // GatherInfo gathers information about the specified struct
-func gatherInfo(prefixes []string, spec interface{}, delim string) ([]varInfo, error) {
+func gatherInfo(prefixes []string, spec interface{}, delim string) ([]*varInfo, error) {
 	s := reflect.ValueOf(spec)
 
 	if s.Kind() != reflect.Ptr {
@@ -68,7 +117,7 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]varInfo, e
 	typeOfSpec := s.Type()
 
 	// over allocate an info array, we will extend if needed later
-	infos := make([]varInfo, 0, s.NumField())
+	infos := make([]*varInfo, 0, s.NumField())
 	for i := 0; i < s.NumField(); i++ {
 		f := s.Field(i)
 		ftype := typeOfSpec.Field(i)
@@ -88,6 +137,29 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]varInfo, e
 			f = f.Elem()
 		}
 
+		var setter, keySetter, elemSetter Setter
+
+		if setterName, ok := ftype.Tag.Lookup("envconfig_setter"); ok {
+			setter = lookupSetter(s, f, setterName)
+			if setter == nil {
+				return nil, fmt.Errorf(`no such setter "%s" found`, setterName)
+			}
+		}
+
+		if setterName, ok := ftype.Tag.Lookup("envconfig_key_setter"); ok {
+			keySetter = lookupSetter(s, f, setterName)
+			if keySetter == nil {
+				return nil, fmt.Errorf(`no such setter "%s" found`, setterName)
+			}
+		}
+
+		if setterName, ok := ftype.Tag.Lookup("envconfig_elem_setter"); ok {
+			elemSetter = lookupSetter(s, f, setterName)
+			if elemSetter == nil {
+				return nil, fmt.Errorf(`no such setter "%s" found`, setterName)
+			}
+		}
+
 		var alt []string
 		if altStr, ok := ftype.Tag.Lookup("envconfig"); ok {
 			alt = strings.Split(altStr, "=")
@@ -95,9 +167,14 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]varInfo, e
 
 		// Capture information about the config variable
 		info := varInfo{
-			Name:  ftype.Name,
-			Field: f,
-			Tags:  ftype.Tag,
+			Name:       ftype.Name,
+			Field:      f,
+			Tags:       ftype.Tag,
+			Setter:     setter,
+			KeySetter:  keySetter,
+			ElemSetter: elemSetter,
+			Default:    ftype.Tag.Get("envconfig_default"),
+			Required:   isTrue(ftype.Tag.Get("envconfig_required")),
 		}
 
 		var key string
@@ -134,28 +211,25 @@ func gatherInfo(prefixes []string, spec interface{}, delim string) ([]varInfo, e
 			}
 		}
 		info.Keys = keys
-		infos = append(infos, info)
 
-		if f.Kind() == reflect.Struct {
+		if f.Kind() == reflect.Struct && info.noUnmarshallerPreset() {
 			// honor Decode if present
-			if decoderFrom(f) == nil && setterFrom(f) == nil && textUnmarshaler(f) == nil && binaryUnmarshaler(f) == nil {
-				innerPrefixes := prefixes
-				if !ftype.Anonymous {
-					innerPrefixes = []string{}
-					for _, key := range keys {
-						innerPrefixes = append(innerPrefixes, composePrefix(key, delim))
-					}
+			innerPrefixes := prefixes
+			if !ftype.Anonymous {
+				innerPrefixes = []string{}
+				for _, key := range keys {
+					innerPrefixes = append(innerPrefixes, composePrefix(key, delim))
 				}
-
-				embeddedPtr := f.Addr().Interface()
-				embeddedInfos, err := gatherInfo(innerPrefixes, embeddedPtr, delim)
-				if err != nil {
-					return nil, err
-				}
-				infos = append(infos[:len(infos)-1], embeddedInfos...)
-
-				continue
 			}
+
+			embeddedPtr := f.Addr().Interface()
+			embeddedInfos, err := gatherInfo(innerPrefixes, embeddedPtr, delim)
+			if err != nil {
+				return nil, err
+			}
+			infos = append(infos, embeddedInfos...)
+		} else {
+			infos = append(infos, &info)
 		}
 	}
 	return infos, nil
@@ -203,20 +277,19 @@ func Process(prefixes []string, spec interface{}, delim string) error {
 			}
 		}
 
-		def := info.Tags.Get("envconfig_default")
-		if def != "" && !ok {
+		def := info.Default
+		if info.Default != "" && !ok {
 			value = def
 		}
 
-		req := info.Tags.Get("envconfig_required")
 		if !ok && def == "" {
-			if isTrue(req) {
+			if info.Required {
 				return fmt.Errorf("required key %s missing value", stringizeKeys(info.Keys))
 			}
 			continue
 		}
 
-		err = processField(value, info.Field)
+		err = info.processField(value)
 		if err != nil {
 			return &ParseError{
 				KeyName:   info.Keys[0],
@@ -239,24 +312,25 @@ func MustProcess(prefixes []string, spec interface{}, delim string) {
 	}
 }
 
-func processField(value string, field reflect.Value) error {
+func (info *varInfo) processField(value string) error {
+	field := info.Field
 	typ := field.Type()
 
-	decoder := decoderFrom(field)
+	decoder := info.decoderFrom()
 	if decoder != nil {
 		return decoder.Decode(value)
 	}
 	// look for Set method if Decode not defined
-	setter := setterFrom(field)
+	setter := info.setterFrom()
 	if setter != nil {
 		return setter.Set(value)
 	}
 
-	if t := textUnmarshaler(field); t != nil {
+	if t := info.textUnmarshaler(); t != nil {
 		return t.UnmarshalText([]byte(value))
 	}
 
-	if b := binaryUnmarshaler(field); b != nil {
+	if b := info.binaryUnmarshaler(); b != nil {
 		return b.UnmarshalBinary([]byte(value))
 	}
 
@@ -310,7 +384,11 @@ func processField(value string, field reflect.Value) error {
 		vals := strings.Split(value, ",")
 		sl := reflect.MakeSlice(typ, len(vals), len(vals))
 		for i, val := range vals {
-			err := processField(val, sl.Index(i))
+			elemInfo := varInfo{
+				Field:  sl.Index(i),
+				Setter: info.ElemSetter,
+			}
+			err := elemInfo.processField(val)
 			if err != nil {
 				return err
 			}
@@ -326,12 +404,20 @@ func processField(value string, field reflect.Value) error {
 					return fmt.Errorf("invalid map item: %q", pair)
 				}
 				k := reflect.New(typ.Key()).Elem()
-				err := processField(kvpair[0], k)
+				keyInfo := varInfo{
+					Field:  k,
+					Setter: info.KeySetter,
+				}
+				err := keyInfo.processField(kvpair[0])
 				if err != nil {
 					return err
 				}
 				v := reflect.New(typ.Elem()).Elem()
-				err = processField(kvpair[1], v)
+				elemInfo := varInfo{
+					Field:  v,
+					Setter: info.ElemSetter,
+				}
+				err = elemInfo.processField(kvpair[1])
 				if err != nil {
 					return err
 				}
@@ -344,36 +430,44 @@ func processField(value string, field reflect.Value) error {
 	return nil
 }
 
-func interfaceFrom(field reflect.Value, fn func(interface{}, *bool)) {
+func (info *varInfo) interfaceFrom(fn func(interface{}, *bool)) {
 	// it may be impossible for a struct field to fail this check
-	if !field.CanInterface() {
+	if !info.Field.CanInterface() {
 		return
 	}
 	var ok bool
-	fn(field.Interface(), &ok)
-	if !ok && field.CanAddr() {
-		fn(field.Addr().Interface(), &ok)
+	fn(info.Field.Interface(), &ok)
+	if !ok && info.Field.CanAddr() {
+		fn(info.Field.Addr().Interface(), &ok)
 	}
 }
 
-func decoderFrom(field reflect.Value) (d Decoder) {
-	interfaceFrom(field, func(v interface{}, ok *bool) { d, *ok = v.(Decoder) })
+func (info *varInfo) decoderFrom() (d Decoder) {
+	info.interfaceFrom(func(v interface{}, ok *bool) { d, *ok = v.(Decoder) })
 	return d
 }
 
-func setterFrom(field reflect.Value) (s Setter) {
-	interfaceFrom(field, func(v interface{}, ok *bool) { s, *ok = v.(Setter) })
-	return s
+func (info *varInfo) setterFrom() (s Setter) {
+	if info.Setter != nil {
+		return info.Setter
+	} else {
+		info.interfaceFrom(func(v interface{}, ok *bool) { s, *ok = v.(Setter) })
+		return s
+	}
 }
 
-func textUnmarshaler(field reflect.Value) (t encoding.TextUnmarshaler) {
-	interfaceFrom(field, func(v interface{}, ok *bool) { t, *ok = v.(encoding.TextUnmarshaler) })
+func (info *varInfo) textUnmarshaler() (t encoding.TextUnmarshaler) {
+	info.interfaceFrom(func(v interface{}, ok *bool) { t, *ok = v.(encoding.TextUnmarshaler) })
 	return t
 }
 
-func binaryUnmarshaler(field reflect.Value) (b encoding.BinaryUnmarshaler) {
-	interfaceFrom(field, func(v interface{}, ok *bool) { b, *ok = v.(encoding.BinaryUnmarshaler) })
+func (info *varInfo) binaryUnmarshaler() (b encoding.BinaryUnmarshaler) {
+	info.interfaceFrom(func(v interface{}, ok *bool) { b, *ok = v.(encoding.BinaryUnmarshaler) })
 	return b
+}
+
+func (info *varInfo) noUnmarshallerPreset() bool {
+	return info.decoderFrom() == nil && info.setterFrom() == nil && info.textUnmarshaler() == nil && info.binaryUnmarshaler() == nil
 }
 
 func isTrue(s string) bool {

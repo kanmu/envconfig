@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"text/template"
@@ -126,19 +125,13 @@ func Usagef(prefixes []string, spec interface{}, out io.Writer, format string, d
 		"usage_key_first":   func(v varInfo) string { return v.Keys[0] },
 		"usage_description": func(v varInfo) string { return v.Tags.Get("envconfig_desc") },
 		"usage_type":        func(v varInfo) string { return toTypeDescription(v.Field.Type()) },
-		"usage_default":     func(v varInfo) string { return v.Tags.Get("envconfig_default") },
-		"usage_required": func(v varInfo) (string, error) {
-			req := v.Tags.Get("envconfig_required")
-			if req != "" {
-				reqB, err := strconv.ParseBool(req)
-				if err != nil {
-					return "", err
-				}
-				if reqB {
-					req = "true"
-				}
+		"usage_default":     func(v varInfo) string { return v.Default },
+		"usage_required": func(v varInfo) string {
+			if v.Required {
+				return "true"
+			} else {
+				return ""
 			}
-			return req, nil
 		},
 	}
 
