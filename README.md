@@ -3,15 +3,15 @@
 This is a fork of https://github.com/kelseyhightower/envconfig.  Kudos to the original authors for saving me a lot of time!"
 
 
-[![Build Status](https://travis-ci.org/moriyoshi/envconfig.svg)](https://travis-ci.org/moriyoshi/envconfig)
+[![Build Status](https://travis-ci.org/kanmu/envconfig.svg)](https://travis-ci.org/kanmu/envconfig)
 
 ```Go
-import "github.com/moriyoshi/envconfig"
+import "github.com/kanmu/envconfig"
 ```
 
 ## Documentation
 
-See [godoc](http://godoc.org/github.com/moriyoshi/envconfig)
+See [godoc](http://godoc.org/github.com/kanmu/envconfig)
 
 ## Usage
 
